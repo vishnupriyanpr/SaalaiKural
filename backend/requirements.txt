@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+firebase-admin
+sqlalchemy
+pydantic
+python-multipart
+httpx
+opencv-python
+ultralytics
+pillow
+folium
+geopy
+numpy
+pandas
+scikit-learn
