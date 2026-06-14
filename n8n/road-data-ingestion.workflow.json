@@ -1,0 +1,217 @@
+{
+  "name": "Saalai Kural — Road & Funding Data Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "a1111111-1111-4111-8111-111111111111",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -40,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.data.gov.in/resource/YOUR_RESOURCE_ID",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api-key",
+              "value": "YOUR_DATA_GOV_IN_API_KEY"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "offset",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "b2222222-2222-4222-8222-222222222222",
+      "name": "Fetch data.gov.in",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Saalai Kural ingestion mapper: data.gov.in record -> /api/roads/ingest ──\n// Adjust COLS to your dataset's REAL column names (left = our schema, right = candidates).\nconst COLS = {\n  name:               ['road_name','name','nh_no','nh_number','road','section','stretch','project_name'],\n  contractor_name:    ['contractor','contractor_name','agency','executing_agency','concessionaire'],\n  contractor_contact: ['contractor_contact','contact','phone','mobile'],\n  jurisdiction_dept:  ['department','dept','authority','implementing_agency','division'],\n  budget_sanctioned:  ['sanctioned_cost','project_cost','cost','sanctioned_amount','total_cost','tpc'],\n  budget_spent:       ['expenditure','amount_spent','cumulative_expenditure','expenditure_incurred'],\n  last_relayed_date:  ['completion_date','last_updated','as_on_date','date','updated_on'],\n};\n// If the dataset reports money in CRORES, set this to 10000000 to store rupees.\nconst BUDGET_MULTIPLIER = 1;\n\nconst root = $input.first().json || {};\nconst records = root.records || root.data || root.rows || [];\n\nfunction pick(row, keys) {\n  for (const k of keys) {\n    const v = row[k];\n    if (v !== undefined && v !== null && String(v).trim() !== '') return v;\n  }\n  return undefined;\n}\nfunction num(v) {\n  if (v === undefined) return 0;\n  const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));\n  return isNaN(n) ? 0 : n;\n}\nfunction inferType(name) {\n  const s = ' ' + String(name).toUpperCase() + ' ';\n  if (s.includes('NATIONAL HIGHWAY') || s.includes('NH')) return 'NH';\n  if (s.includes('STATE HIGHWAY') || s.includes(' SH')) return 'SH';\n  if (s.includes('MDR') || s.includes('MAJOR DISTRICT')) return 'MDR';\n  return 'MDR';\n}\n\nconst seen = new Set();\nconst roads = [];\nfor (const row of records) {\n  const rawName = pick(row, COLS.name);\n  if (!rawName) continue;                 // never invent a road without a real name\n  const name = String(rawName).trim();\n  const key = name.toLowerCase();\n  if (seen.has(key)) continue;            // de-dupe within a batch\n  seen.add(key);\n  const type = inferType(name);\n  const deptDefault = type === 'NH'\n    ? 'National Highways Authority'\n    : type === 'SH' ? 'State Highways' : 'Rural Development & Panchayat Raj';\n  roads.push({\n    name,\n    type,\n    jurisdiction_dept: pick(row, COLS.jurisdiction_dept) || deptDefault,\n    contractor_name: pick(row, COLS.contractor_name) || null,\n    contractor_contact: pick(row, COLS.contractor_contact) || null,\n    budget_sanctioned: num(pick(row, COLS.budget_sanctioned)) * BUDGET_MULTIPLIER,\n    budget_spent: num(pick(row, COLS.budget_spent)) * BUDGET_MULTIPLIER,\n    last_relayed_date: pick(row, COLS.last_relayed_date) || null,\n    maintenance_history: [],\n  });\n}\n\nconsole.log('Saalai Kural ingestion: mapped ' + roads.length + ' road(s) from ' + records.length + ' record(s).');\nreturn [{ json: { roads, count: roads.length } }];"
+      },
+      "id": "c3333333-3333-4333-8333-333333333333",
+      "name": "Map to roads schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d4444444-4444-4444-8444-444444444444",
+              "leftValue": "={{ $json.roads.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4444444-4444-4444-8444-444444444445",
+      "name": "Has roads?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/roads/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ingest-token",
+              "value": "YOUR_INGEST_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"roads\": $json.roads } }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "e5555555-5555-4555-8555-555555555555",
+      "name": "POST /api/roads/ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {},
+      "id": "f6666666-6666-4666-8666-666666666666",
+      "name": "Nothing to ingest",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        940,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch data.gov.in",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch data.gov.in": {
+      "main": [
+        [
+          {
+            "node": "Map to roads schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map to roads schema": {
+      "main": [
+        [
+          {
+            "node": "Has roads?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has roads?": {
+      "main": [
+        [
+          {
+            "node": "POST /api/roads/ingest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "saalaikural-ingestion"
+  },
+  "tags": []
+}
