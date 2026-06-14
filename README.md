@@ -14,7 +14,7 @@
                                   ╚═╝  ╚═╝  ╚═════╝  ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚══════╝
     
     
-                                    சாலையின் குரல்  ·  Voice of the Road
+                                   சாலையின் குரல்  ·  Voice of the Road
                       AI civic road-repair platform · Made fot The Government of Tamil Nadu
 ```
 
